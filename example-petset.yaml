@@ -1,0 +1,114 @@
+apiVersion: "apps/v1alpha1"
+kind: PetSet
+metadata:
+  name: cassandra
+spec:
+  serviceName: cassandra
+  replicas: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        annotations:
+          volume.beta.kubernetes.io/storage-class: aws-cassandra
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 200Gi
+  template:
+    metadata:
+      annotations:
+        pod.alpha.kubernetes.io/initialized: "true"
+      labels:
+        app: sysdigcloud
+        role: cassandra
+    spec:
+      imagePullSecrets:
+        - name: sysdigcloud-pull-secret
+      containers:
+      - name: cassandra
+        image: "quay.io/sysdig/cassandra:2.1"
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 7000
+          name: intra-node
+        - containerPort: 7001
+          name: tls-intra-node
+        - containerPort: 7199
+          name: jmx
+        - containerPort: 9042
+          name: cql
+        resources:
+         limits:
+          cpu: 1
+          memory: 8G
+        env:
+          - name: CASSANDRA_SERVICE
+            value: sysdigcloud-cassandra
+          - name: CASSANDRA_NUM_SEEDS
+            value: "2"
+          - name: CASSANDRA_CLUSTER_NAME
+            value: sysdigcloud
+          - name: JVM_EXTRA_OPTS
+            valueFrom:
+              configMapKeyRef:
+                name: sysdigcloud-config
+                key: cassandra.jvm.options
+          - name: JVM_OPTS
+            value: "-Dcassandra.consistent.rangemovement=false -Dcassandra.replace_address=$POD_IP"
+          - name: MAX_HEAP_SIZE
+            value: 7G
+          - name: HEAP_NEWSIZE
+            value: 400M
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: CASSANDRA_OPEN_JMX
+            value: "true"
+          - name: CASSANDRA_GC_STDOUT
+            value: "true"
+        volumeMounts:
+        # These volume mounts are persistent. They're like inline claims,
+        # but not exactly because the names need to match exactly one of
+        # the pet volumes.
+        - name: data
+          mountPath: /var/lib/cassandra/
+      - name: backup
+        image: quay.io/ukhomeofficedigital/cassandra-backup-to-s3:v0.0.1
+        imagePullPolicy: Always
+        env:
+        - name: KUBERNETES_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws
+              key: aws.access.key
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws
+              key: aws.secret.key
+        - name: AWS_KMS_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws
+              key: aws.kms.id
+        - name: AWS_BUCKET_NAME
+          valueFrom:
+            secretKeyRef:
+              name: aws
+              key: aws.bucket.name
+        volumeMounts:
+        # These volume mounts are persistent. They're like inline claims,
+        # but not exactly because the names need to match exactly one of
+        # the pet volumes.
+        - name: data
+          mountPath: /var/lib/cassandra/
