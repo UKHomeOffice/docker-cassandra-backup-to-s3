@@ -17,27 +17,22 @@ export CASSANDRA_PORT="${CASSANDRA_PORT:-7199}"
 export CASSANDRA_KEYSPACE="${CASSANDRA_KEYSPACE:-draios}"
 export CASSANDRA_DATA="${CASSANDRA_DATA:-/var/lib/cassandra/data}"
 
-while true; do
 
-  TIME=`date "+%Y%m%d_%H%M"`
-  FILENAME=${CASSANDRA_DATA}/${KUBERNETES_POD_NAME}_${CASSANDRA_KEYSPACE}_${TIME}.tar.gz
+TIME=`date "+%Y%m%d_%H%M"`
+FILENAME=${CASSANDRA_DATA}/${KUBERNETES_POD_NAME}_${CASSANDRA_KEYSPACE}_${TIME}.tar.gz
 
-  echo "-- Clearing old snapshots --"
-  nodetool -h ${CASSANDRA_HOST} -p ${CASSANDRA_PORT} clearsnapshot
+echo "-- Creating new snapshot for ${CASSANDRA_KEYSPACE} called ${TIME} --"
+nodetool -h ${CASSANDRA_HOST} -p ${CASSANDRA_PORT} snapshot ${CASSANDRA_KEYSPACE} -t ${TIME}
 
-  echo "-- Creating new snapshot for ${CASSANDRA_KEYSPACE} called ${TIME} --"
-  nodetool -h ${CASSANDRA_HOST} -p ${CASSANDRA_PORT} snapshot ${CASSANDRA_KEYSPACE} -t ${TIME}
+echo "-- Pushing snapshots to S3... --"
 
-  echo "-- Pushing snapshots to S3... --"
+dirs=$(find ${CASSANDRA_DATA}/${CASSANDRA_KEYSPACE} -name ${TIME})
+tar -cvzf ${FILENAME} $dirs
+aws s3 mv ${FILENAME} s3://${AWS_BUCKET_NAME} \
+        --sse-kms-key-id ${AWS_KMS_ID} \
+        --sse aws:kms
 
-  dirs=$(find ${CASSANDRA_DATA}/${CASSANDRA_KEYSPACE} -name ${TIME})
-  tar -cvzf ${FILENAME} $dirs
-  aws s3 mv ${FILENAME} s3://${AWS_BUCKET_NAME} \
-          --sse-kms-key-id ${AWS_KMS_ID} \
-          --sse aws:kms \
-          --expires $(date -d "7 days") \
-          --metadata-directive REPLACE
+echo "-- S3 backup complete! --"
 
-  echo "-- S3 backup complete! --"
-
-done
+echo "-- Clearing old snapshots --"
+nodetool -h ${CASSANDRA_HOST} -p ${CASSANDRA_PORT} clearsnapshot
