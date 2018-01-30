@@ -38,8 +38,7 @@ RUN mkdir /opt && cd /opt && \
     chmod 755 dsc-cassandra-${CASSANDRA_VERSION}/bin
 
 COPY backup /usr/local/bin/backup
+COPY entrypoint /usr/local/bin/entrypoint
 
-RUN crontab -l | { cat; echo "0    0       *       *       *       /usr/local/bin/backup >> /var/log/cron.log 2>&1"; } | crontab - && \
-    touch /var/log/cron.log
-
-ENTRYPOINT crond && tail -f /var/log/cron.log
+# Check the params are correct on start-up
+ENTRYPOINT /usr/local/bin/entrypoint
