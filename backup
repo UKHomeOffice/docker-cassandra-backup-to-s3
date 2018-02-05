@@ -2,37 +2,32 @@
 
 set -e
 
-if [ -z "${AWS_ACCESS_KEY_ID}" ]; then echo "AWS_ACCESS_KEY_ID needs to be set"; exit 1; fi
-if [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then echo "AWS_SECRET_ACCESS_KEY needs to be set"; exit 1; fi
-if [ -z "${AWS_KMS_ID}" ]; then echo "AWS_KMS_ID needs to be set"; exit 1; fi
-if [ -z "${AWS_BUCKET_NAME}" ]; then echo "AWS_BUCKET_NAME needs to be set"; exit 1; fi
-
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
-export AWS_KMS_ID="${AWS_KMS_ID}"
-export AWS_BUCKET_NAME="${AWS_BUCKET_NAME}"
-export KUBERNETES_POD_NAME="${KUBERNETES_POD_NAME:-localhost}"
-export CASSANDRA_HOST="${CASSANDRA_HOST:-localhost}"
-export CASSANDRA_PORT="${CASSANDRA_PORT:-7199}"
-export CASSANDRA_KEYSPACE="${CASSANDRA_KEYSPACE:-draios}"
-export CASSANDRA_DATA="${CASSANDRA_DATA:-/var/lib/cassandra/data}"
-
-
 TIME=`date "+%Y%m%d_%H%M"`
-FILENAME=${CASSANDRA_DATA}/${KUBERNETES_POD_NAME}_${CASSANDRA_KEYSPACE}_${TIME}.tar.gz
+FILENAME=${CASSANDRA_BACKUPS:-${CASSANDRA_DATA}}/${KUBERNETES_POD_NAME}_${CASSANDRA_KEYSPACE}_${TIME}.tar.gz
 
 echo "-- Creating new snapshot for ${CASSANDRA_KEYSPACE} called ${TIME} --"
 nodetool -h ${CASSANDRA_HOST} -p ${CASSANDRA_PORT} snapshot ${CASSANDRA_KEYSPACE} -t ${TIME}
 
-echo "-- Pushing snapshots to S3... --"
+echo "-- Archiving snapshots... --"
 
 dirs=$(find ${CASSANDRA_DATA}/${CASSANDRA_KEYSPACE} -name ${TIME})
 tar -cvzf ${FILENAME} $dirs
-aws s3 mv ${FILENAME} s3://${AWS_BUCKET_NAME} \
-        --sse-kms-key-id ${AWS_KMS_ID} \
-        --sse aws:kms
 
-echo "-- S3 backup complete! --"
+if [[ -z ${CASSANDRA_BACKUPS} ]]; then
+  echo "-- Pushing snapshots to S3... --"
+
+  aws s3 mv ${FILENAME} s3://${AWS_BUCKET_NAME} \
+          --sse-kms-key-id ${AWS_KMS_ID} \
+          --sse aws:kms
+
+  echo "-- S3 backup complete! --"
+else
+  echo "-- Backup created @ ${FILENAME} --"
+
+  echo "--- Removing old archives... --"
+  find ${CASSANDRA_BACKUPS}/* -mtime +${RETAIN_DAYS} -exec rm {} \;
+fi
 
 echo "-- Clearing old snapshots --"
 nodetool -h ${CASSANDRA_HOST} -p ${CASSANDRA_PORT} clearsnapshot
+echo "-- Backup complete --"
